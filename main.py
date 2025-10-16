@@ -1,4 +1,5 @@
 import cv2, eyw, os.path, json
+import numpy as np
 
 camera_feed = cv2.VideoCapture(0)
 cv2.namedWindow("Camera Feed")
@@ -13,7 +14,7 @@ cv2.createTrackbar("red-max", 'Trackbars', 0, 255, lambda x: None)
 cv2.createTrackbar("green-max", 'Trackbars', 0, 255, lambda x: None)
 cv2.createTrackbar("blue-max", 'Trackbars', 0, 255, lambda x: None)
 
-def combineMasks(frame, min, max):
+def combineImages(frame, min, max):
     mask1 = eyw.create_mask(frame, min[0], max[0])
     mask2 = eyw.create_mask(frame, min[1], max[1])
     mask3 = eyw.create_mask(frame, min[2], max[2])
@@ -24,7 +25,7 @@ def combineMasks(frame, min, max):
     combined = eyw.combine_images(combined, masked_image3)
     return combined
 
-def combined_binary_mask(frame, mins, maxs):
+def combinedMasks(frame, mins, maxs):
     # Build one binary mask from all 3 color ranges
     m1 = eyw.create_mask(frame, mins[0], maxs[0])
     m2 = eyw.create_mask(frame, mins[1], maxs[1])
@@ -37,11 +38,7 @@ def combined_binary_mask(frame, mins, maxs):
     mask = cv2.dilate(mask, kernel, iterations=1)
     return mask
 
-def draw_bounding_boxes(image, mask, min_area=500):
-    """
-    Draw rectangles around connected components in 'mask'.
-    min_area filters out tiny noise blobs; tune as needed.
-    """
+def draw_bounding_boxes(image, mask, min_area):
     # Find external contours only
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -51,15 +48,17 @@ def draw_bounding_boxes(image, mask, min_area=500):
         if area < min_area:
             continue
         x, y, w, h = cv2.boundingRect(c)
-        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 255), 2)  # box
-        # Optional label (area)
-        cv2.putText(out, f"{int(area)}", (x, max(0, y - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 255), 2)
+    # cv2.circle(out, [(x+(w/2)), (y+(h/2))], 3, (0, 0, 255), 5)
     return out
 
-min = [[0, 0, 0], [0, 0, 0], [0, 0, 0]] # blue green red
-max = [[255, 255, 255], [0, 0, 0], [0, 0, 0]] # blue green red
-temp = 0
+tracking = False
+
+# min = [[0, 0, 0], [0, 0, 0], [0, 0, 0]] # blue green red
+# max = [[255, 255, 255], [0, 0, 0], [0, 0, 0]] # blue green red
+minc = [[64, 61, 0], [0, 0, 0], [0, 0, 0]]
+maxc = [[255, 229, 43], [0, 0, 0], [0, 0, 0]]
+temp = -1
 
 while True:
     ret, frame = camera_feed.read()
@@ -67,28 +66,32 @@ while True:
 
     colorSelect = cv2.getTrackbarPos('color-select', 'Trackbars')
     if colorSelect != temp:
-        cv2.setTrackbarPos('blue-min', 'Trackbars', min[colorSelect][0])
-        cv2.setTrackbarPos('green-min', 'Trackbars', min[colorSelect][1])
-        cv2.setTrackbarPos('red-min', 'Trackbars', min[colorSelect][2])
-        cv2.setTrackbarPos('blue-max', 'Trackbars', max[colorSelect][0])
-        cv2.setTrackbarPos('green-max', 'Trackbars', max[colorSelect][1])
-        cv2.setTrackbarPos('red-max', 'Trackbars', max[colorSelect][2])
+        cv2.setTrackbarPos('blue-min', 'Trackbars', minc[colorSelect][0])
+        cv2.setTrackbarPos('green-min', 'Trackbars', minc[colorSelect][1])
+        cv2.setTrackbarPos('red-min', 'Trackbars', minc[colorSelect][2])
+        cv2.setTrackbarPos('blue-max', 'Trackbars', maxc[colorSelect][0])
+        cv2.setTrackbarPos('green-max', 'Trackbars', maxc[colorSelect][1])
+        cv2.setTrackbarPos('red-max', 'Trackbars', maxc[colorSelect][2])
         temp = colorSelect
 
-    min[colorSelect] = [cv2.getTrackbarPos("blue-min", "Trackbars"), cv2.getTrackbarPos("green-min", "Trackbars"), cv2.getTrackbarPos("red-min", "Trackbars")]
-    max[colorSelect] = [cv2.getTrackbarPos("blue-max", "Trackbars"), cv2.getTrackbarPos("green-max", "Trackbars"),
+    minc[colorSelect] = [cv2.getTrackbarPos("blue-min", "Trackbars"), cv2.getTrackbarPos("green-min", "Trackbars"), cv2.getTrackbarPos("red-min", "Trackbars")]
+    maxc[colorSelect] = [cv2.getTrackbarPos("blue-max", "Trackbars"), cv2.getTrackbarPos("green-max", "Trackbars"),
            cv2.getTrackbarPos("red-max", "Trackbars")]
 
-    combined = combineMasks(frame, min, max)
+    if tracking:
+        masks = combinedMasks(frame, minc, maxc)
+        boxed = draw_bounding_boxes(frame, masks, min_area=50)
+        cv2.imshow("Camera Feed", boxed)
+
+    combined = combineImages(frame, minc, maxc)
     cv2.imshow("Mask", combined)
 
     keypressed = cv2.waitKey(1)
     if keypressed == ord('s'):
         # create file names
-        file = "ColorValues"
         save_name = input("Enter a filename to save as or leave blank to use default name: ")
         if save_name == "":
-            save_name = file
+            save_name = "colorValues"
         txt_file = save_name + '.txt'
 
         # ensure file names don't exist
@@ -99,29 +102,32 @@ while True:
 
         # write files
         with open(txt_file, 'w') as f:
-            json.dump(min, f)
+            json.dump(minc, f)
             f.write("\n")
-            json.dump(max, f)
+            json.dump(maxc, f)
             f.write("\n")
-        print("Saved!")
+            print("Saved!")
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
             with open(data, 'r') as f:
                 # loads break and color data
-                min = json.loads(f.readline())
-                max = json.loads(f.readline())
+                minc = json.loads(f.readline())
+                maxc = json.loads(f.readline())
 
                 # reset trackbars to match newly imported data
-                cv2.setTrackbarPos('blue-min', 'Trackbars', min[0][0])
-                cv2.setTrackbarPos('green-min', 'Trackbars', min[0][1])
-                cv2.setTrackbarPos('red-min', 'Trackbars', min[0][2])
-                cv2.setTrackbarPos('blue-max', 'Trackbars', max[0][0])
-                cv2.setTrackbarPos('green-max', 'Trackbars', max[0][1])
-                cv2.setTrackbarPos('red-max', 'Trackbars', max[0][2])
+                cv2.setTrackbarPos('blue-min', 'Trackbars', minc[0][0])
+                cv2.setTrackbarPos('green-min', 'Trackbars', minc[0][1])
+                cv2.setTrackbarPos('red-min', 'Trackbars', minc[0][2])
+                cv2.setTrackbarPos('blue-max', 'Trackbars', maxc[0][0])
+                cv2.setTrackbarPos('green-max', 'Trackbars', maxc[0][1])
+                cv2.setTrackbarPos('red-max', 'Trackbars', maxc[0][2])
                 temp = 0
         else:
             print("The filename was invalid")
+    if keypressed == ord('t'):
+        tracking = not tracking
+        print("Tracking:", tracking)
     if keypressed == 27:
         break
 
