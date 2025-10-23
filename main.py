@@ -16,11 +16,9 @@ def init():
     cv2.namedWindow("Mask")
 
     cv2.createTrackbar("error", 'Mask', 10, 25, lambda x: None)
+    cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
-
-def get_color(mouseX, mouseY, frame):
-    return frame[mouseY][mouseX]
 
 def combine_images(frame, min, max):
     mask1 = eyw.create_mask(frame, min[0], max[0])
@@ -41,7 +39,7 @@ def combined_masks(frame, mins, maxs):
     mask = cv2.bitwise_or(m1, cv2.bitwise_or(m2, m3))
     return mask
 
-def find_largest_box(mask, min_area=250):
+def find_largest_box(mask, min_area):
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     best = None
     best_area = 0
@@ -55,26 +53,13 @@ def find_largest_box(mask, min_area=250):
     x, y, w, h = cv2.boundingRect(best)
     return (x, y, w, h)
 
-def boxes_by_color(frame, mins, maxs, min_area=250):
+def boxes_by_color(frame, mins, maxs, min_area):
     result = []
     for i in range(len(mins)):
         m = eyw.create_mask(frame, mins[i], maxs[i])
         box = find_largest_box(m, min_area=min_area)
         result.append(box)
     return result
-
-def draw_boxes(image, mask, min_area):
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    out = image.copy()
-    boxes = []
-    for c in cnts:
-        area = cv2.contourArea(c)
-        if area < min_area:
-            continue
-        x, y, w, h = cv2.boundingRect(c)
-        boxes.append((x, y, w, h))
-        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 255), 2)
-    return out, boxes
 
 def get_center(box):
     x, y, w, h = box
@@ -157,7 +142,20 @@ while True:
     ret, frame = camera_feed.read()
     if not ret:
         break
+
+    drawings = frame.copy()
+
+    # crosshair
+    cv2.circle(drawings, (mouseX, mouseY), 4, (0, 255, 0), -1)
+    # swatches for picked colors
+    for i, (b, g, r) in enumerate(colors):
+        tl = (10 + i * 70, 10)
+        br = (10 + i * 70 + 60, 40)
+        cv2.rectangle(drawings, tl, br, (int(b), int(g), int(r)), -1)
+        cv2.rectangle(drawings, tl, br, (255, 255, 255), 1)
     cv2.imshow("Camera Feed", frame)
+
+    min_area = cv2.getTrackbarPos("min-area", "Mask") * 50
 
     # get box by color order
     color_error = cv2.getTrackbarPos("error", "Mask")
@@ -168,9 +166,8 @@ while True:
                                      [[min(255-color_error, b) + color_error,
                                        min(255-color_error, g) + color_error,
                                        min(255-color_error, r) + color_error] for (b, g, r) in colors],
-                                     min_area=250)
+                                     min_area=min_area)
 
-    drawings = frame.copy()
     centers = []
 
     # draw boxes
@@ -215,11 +212,11 @@ while True:
     # keyboard controls
     keypressed = cv2.waitKey(1)
     if keypressed == ord('1'):
-        colors[0][2], colors[0][1], colors[0][0] = frame[mouseY, mouseX]
+        colors[0][0], colors[0][1], colors[0][2] = frame[mouseY, mouseX]
     if keypressed == ord('2'):
-        colors[1][2], colors[1][1], colors[1][0] = frame[mouseY, mouseX]
+        colors[1][0], colors[1][1], colors[1][2] = frame[mouseY, mouseX]
     if keypressed == ord('3'):
-        colors[2][2], colors[2][1], colors[2][0] = frame[mouseY, mouseX]
+        colors[2][0], colors[2][1], colors[2][2] = frame[mouseY, mouseX]
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
