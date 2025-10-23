@@ -1,22 +1,28 @@
+#todo - show other detections in diff color bounding box, hsv, lighting correction, get target angles
 import cv2, eyw, os.path, json
 import numpy as np
 
 camera_feed = cv2.VideoCapture(0)
 
+mouseX, mouseY = 0, 0
+
+def get_mouse_pos(event, x, y, flags, param):
+    global mouseX, mouseY
+    if event == cv2.EVENT_MOUSEMOVE:  # Or cv2.EVENT_LBUTTONDOWN for clicks
+        mouseX, mouseY = x, y
+
 def init():
     cv2.namedWindow("Camera Feed")
     cv2.namedWindow("Mask")
-    cv2.namedWindow("Trackbars")
 
-    cv2.createTrackbar("color-select", 'Trackbars', 0, 2, lambda x: None)
-    cv2.createTrackbar("red-min", 'Trackbars', 0, 255, lambda x: None)
-    cv2.createTrackbar("green-min", 'Trackbars', 0, 255, lambda x: None)
-    cv2.createTrackbar("blue-min", 'Trackbars', 0, 255, lambda x: None)
-    cv2.createTrackbar("red-max", 'Trackbars', 0, 255, lambda x: None)
-    cv2.createTrackbar("green-max", 'Trackbars', 0, 255, lambda x: None)
-    cv2.createTrackbar("blue-max", 'Trackbars', 0, 255, lambda x: None)
+    cv2.createTrackbar("error", 'Mask', 10, 25, lambda x: None)
 
-def combineImages(frame, min, max):
+    cv2.setMouseCallback("Camera Feed", get_mouse_pos)
+
+def get_color(mouseX, mouseY, frame):
+    return frame[mouseY][mouseX]
+
+def combine_images(frame, min, max):
     mask1 = eyw.create_mask(frame, min[0], max[0])
     mask2 = eyw.create_mask(frame, min[1], max[1])
     mask3 = eyw.create_mask(frame, min[2], max[2])
@@ -27,7 +33,7 @@ def combineImages(frame, min, max):
     combined = eyw.combine_images(combined, masked_image3)
     return combined
 
-def combinedMasks(frame, mins, maxs):
+def combined_masks(frame, mins, maxs):
     # Build one binary mask from all 3 color ranges
     m1 = eyw.create_mask(frame, mins[0], maxs[0])
     m2 = eyw.create_mask(frame, mins[1], maxs[1])
@@ -57,7 +63,7 @@ def boxes_by_color(frame, mins, maxs, min_area=250):
         result.append(box)
     return result
 
-def drawBoxes(image, mask, min_area):
+def draw_boxes(image, mask, min_area):
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     out = image.copy()
     boxes = []
@@ -70,14 +76,14 @@ def drawBoxes(image, mask, min_area):
         cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 255), 2)
     return out, boxes
 
-def getCenter(box):
+def get_center(box):
     x, y, w, h = box
     return int(x + w / 2), int(y + h / 2)
 
-def drawLine(image, box1, box2):
+def draw_line(image, box1, box2):
     out = image.copy()
-    c1 = getCenter(box1)
-    c2 = getCenter(box2)
+    c1 = get_center(box1)
+    c2 = get_center(box2)
 
     cv2.line(out, c1, c2, (0, 0, 255), 2, cv2.LINE_AA)
     cv2.circle(out, c1, 4, (255, 255, 255), -1)
@@ -119,24 +125,12 @@ def compute_chain_angle(centers, i=0, j=1, k=2):
         return None
     return angle_between_lines(centers[i], centers[j], centers[k])
 
-
-
-def importColors(data):
+def import_colors(data):
     with open(data, 'r') as f:
-        # loads break and color data
-        minc = json.loads(f.readline())
-        maxc = json.loads(f.readline())
+        colors = json.loads(f.readline())
+    return colors
 
-        # reset trackbars to match newly imported data
-        cv2.setTrackbarPos('blue-min', 'Trackbars', minc[0][0])
-        cv2.setTrackbarPos('green-min', 'Trackbars', minc[0][1])
-        cv2.setTrackbarPos('red-min', 'Trackbars', minc[0][2])
-        cv2.setTrackbarPos('blue-max', 'Trackbars', maxc[0][0])
-        cv2.setTrackbarPos('green-max', 'Trackbars', maxc[0][1])
-        cv2.setTrackbarPos('red-max', 'Trackbars', maxc[0][2])
-    return minc, maxc
-
-def saveColors(minc, maxc):
+def save_colors(colors):
     # create file names
     save_name = input("Enter a filename to save as or leave blank to use default name: ")
     if save_name == "":
@@ -151,95 +145,91 @@ def saveColors(minc, maxc):
 
     # write files
     with open(txt_file, 'w') as f:
-        json.dump(minc, f)
-        f.write("\n")
-        json.dump(maxc, f)
-        f.write("\n")
+        json.dump(colors, f)
 
 init()
 
-# min = [[0, 0, 0], [0, 0, 0], [0, 0, 0]] # blue green red
-# max = [[255, 255, 255], [0, 0, 0], [0, 0, 0]] # blue green red
-minc, maxc = importColors("red-pruple-green2.txt")
+colors = [[0,0,0], [0,0,0], [0,0,0]]
+color_error = cv2.getTrackbarPos("error", "Mask")
 
-tracking = True
-temp = -1
 while True:
+    # read camera feed
     ret, frame = camera_feed.read()
     if not ret:
         break
     cv2.imshow("Camera Feed", frame)
 
-    colorSelect = cv2.getTrackbarPos('color-select', 'Trackbars')
-    if colorSelect != temp:
-        cv2.setTrackbarPos('blue-min', 'Trackbars', minc[colorSelect][0])
-        cv2.setTrackbarPos('green-min', 'Trackbars', minc[colorSelect][1])
-        cv2.setTrackbarPos('red-min', 'Trackbars', minc[colorSelect][2])
-        cv2.setTrackbarPos('blue-max', 'Trackbars', maxc[colorSelect][0])
-        cv2.setTrackbarPos('green-max', 'Trackbars', maxc[colorSelect][1])
-        cv2.setTrackbarPos('red-max', 'Trackbars', maxc[colorSelect][2])
-        temp = colorSelect
-    minc[colorSelect] = [cv2.getTrackbarPos("blue-min", "Trackbars"),
-                         cv2.getTrackbarPos("green-min", "Trackbars"),
-                         cv2.getTrackbarPos("red-min", "Trackbars")]
-    maxc[colorSelect] = [cv2.getTrackbarPos("blue-max", "Trackbars"),
-                         cv2.getTrackbarPos("green-max", "Trackbars"),
-                         cv2.getTrackbarPos("red-max", "Trackbars")]
+    # get box by color order
+    color_error = cv2.getTrackbarPos("error", "Mask")
+    per_color_boxes = boxes_by_color(frame,
+                                     [[max(color_error, b) - color_error,
+                                       max(color_error, g) - color_error,
+                                       max(color_error, r) - color_error] for (b, g, r) in colors],
+                                     [[min(255-color_error, b) + color_error,
+                                       min(255-color_error, g) + color_error,
+                                       min(255-color_error, r) + color_error] for (b, g, r) in colors],
+                                     min_area=250)
 
-    if tracking:
-        # get box by color order
-        per_color_boxes = boxes_by_color(frame, minc, maxc, min_area=250)
+    drawings = frame.copy()
+    centers = []
 
-        drawings = frame.copy()
-        centers = []
+    # draw boxes
+    for box in per_color_boxes:
+        if box is None:
+            centers.append(None)
+            continue
+        x, y, w, h = box
+        cv2.rectangle(drawings, (x, y), (x + w, y + h), (0, 255, 255), 2)
+        centers.append(get_center(box))
 
-        # draw boxes
-        for box in per_color_boxes:
-            if box is None:
-                centers.append(None)
-                continue
-            x, y, w, h = box
-            cv2.rectangle(drawings, (x, y), (x + w, y + h), (0, 255, 255), 2)
-            centers.append(getCenter(box))
+    # draw lines between boxes in order
+    prev_center = None
+    for c in centers:
+        if prev_center is not None and c is not None:
+            # Create tiny "boxes" around centers to reuse drawLine()
+            bx_prev = (prev_center[0]-1, prev_center[1]-1, 2, 2)
+            bx_curr = (c[0]-1, c[1]-1, 2, 2)
+            drawings = draw_line(drawings, bx_prev, bx_curr)
+        prev_center = c
 
-        # draw lines between boxes in order
-        prev_center = None
-        for c in centers:
-            if prev_center is not None and c is not None:
-                # Create tiny "boxes" around centers to reuse drawLine()
-                bx_prev = (prev_center[0]-1, prev_center[1]-1, 2, 2)
-                bx_curr = (c[0]-1, c[1]-1, 2, 2)
-                drawings = drawLine(drawings, bx_prev, bx_curr)
-            prev_center = c
+    # get angle between lines
+    angle = compute_chain_angle(centers, 0, 1, 2)
+    if angle is not None:
+        # label near the middle point if it exists, else fallback corner
+        label_pos = centers[1] if centers[1] is not None else (20, 40)
+        cv2.putText(drawings, f"{angle:.1f} deg",
+                    label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-        # get angle between lines
-        angle = compute_chain_angle(centers, 0, 1, 2)
-        if angle is not None:
-            # label near the middle point if it exists, else fallback corner
-            label_pos = centers[1] if centers[1] is not None else (20, 40)
-            cv2.putText(drawings, f"{angle:.1f} deg",
-                        label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.imshow("Camera Feed", drawings)
 
-        cv2.imshow("Camera Feed", drawings)
-
-    combined = combineImages(frame, minc, maxc)
+    # display detected regions in mask window
+    combined = combine_images(frame,
+                              [[max(color_error, b) - color_error,
+                                max(color_error, g) - color_error,
+                                max(color_error, r) - color_error] for (b, g, r) in colors],
+                              [[min(255 - color_error, b) + color_error,
+                                min(255 - color_error, g) + color_error,
+                                min(255 - color_error, r) + color_error] for (b, g, r) in colors])
     cv2.imshow("Mask", combined)
 
+    # keyboard controls
     keypressed = cv2.waitKey(1)
-    if keypressed == ord('s'):
-        saveColors(minc, maxc)
-        print("Saved!")
+    if keypressed == ord('1'):
+        colors[0][2], colors[0][1], colors[0][0] = frame[mouseY, mouseX]
+    if keypressed == ord('2'):
+        colors[1][2], colors[1][1], colors[1][0] = frame[mouseY, mouseX]
+    if keypressed == ord('3'):
+        colors[2][2], colors[2][1], colors[2][0] = frame[mouseY, mouseX]
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
-            minc, maxc = importColors(data)
-            temp = 0
+            colors = import_colors(data)
             print("Imported!")
         else:
             print("The filename was invalid")
-    if keypressed == ord('t'):
-        tracking = not tracking
-        print("Tracking:", tracking)
+    if keypressed == ord('s'):
+        save_colors(colors)
+        print("Saved!")
     if keypressed == 27:
         break
 
