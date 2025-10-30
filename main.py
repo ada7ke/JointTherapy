@@ -1,4 +1,4 @@
-#todo - show other detections in diff color bounding box, hsv, lighting correction, get target angles
+#todo - lighting correction, get target angles
 import cv2, eyw, os.path, json
 import numpy as np
 
@@ -7,20 +7,25 @@ camera_feed = cv2.VideoCapture(0)
 mouseX, mouseY = 0, 0
 
 def get_mouse_pos(event, x, y, flags, param):
+    # get mouse position
     global mouseX, mouseY
-    if event == cv2.EVENT_MOUSEMOVE:  # Or cv2.EVENT_LBUTTONDOWN for clicks
+    if event == cv2.EVENT_MOUSEMOVE:
         mouseX, mouseY = x, y
 
 def init():
+    # create windows
     cv2.namedWindow("Camera Feed")
     cv2.namedWindow("Mask")
 
+    # create trackbars for fine tuning
     cv2.createTrackbar("error", 'Mask', 25, 50, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
+    # initialize getting mouse position
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
 
-def combine_images(frame, min, max):
+def display_masks(frame, min, max):
+    # display masks for mask window
     mask1 = eyw.create_mask(frame, min[0], max[0])
     mask2 = eyw.create_mask(frame, min[1], max[1])
     mask3 = eyw.create_mask(frame, min[2], max[2])
@@ -31,16 +36,8 @@ def combine_images(frame, min, max):
     combined = eyw.combine_images(combined, masked_image3)
     return combined
 
-def combined_masks(frame, mins, maxs):
-    # Build one binary mask from all 3 color ranges
-    m1 = eyw.create_mask(frame, mins[0], maxs[0])
-    m2 = eyw.create_mask(frame, mins[1], maxs[1])
-    m3 = eyw.create_mask(frame, mins[2], maxs[2])
-    mask = cv2.bitwise_or(m1, cv2.bitwise_or(m2, m3))
-    return mask
-
 def draw_swatches(drawings, colors):
-    # swatches for picked colors
+    # display swatches for picked colors in top left corner of window
     for i, (b, g, r) in enumerate(colors):
         tl = (10 + i * 40, 10)
         br = (10 + i * 40 + 30, 40)
@@ -75,39 +72,23 @@ def draw_boxes(frame, color_min, color_max, min_area):
 
     for color in range(3):
         mask = eyw.create_mask(frame, color_min[color], color_max[color])
-        # clean speckle to stabilize contours
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        mask = cv2.dilate(mask, kernel, iterations=1)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         primary = get_largest_box(contours, min_area)
+        color_center = None
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < min_area:
-                continue
+            if area > min_area:
+                x, y, w, h = cv2.boundingRect(contour)
+                if contour is primary:
+                    outline_color = (0, 255, 0)
+                    color_center = (int(x + w / 2), int(y + h / 2))
+                else:
+                    outline_color = (0, 255, 255)
+                cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
 
-            x, y, w, h = cv2.boundingRect(contour)
-            is_primary = (contour is primary)
-            outline_color = (0, 255, 0) if is_primary else (0, 255, 255)
-            cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
-
-            if is_primary:
-                color_center = (int(x + w / 2), int(y + h / 2))
-
-        centers.append(color_center)
-        # for contour in contours:
-        #     area = cv2.contourArea(contour)
-        #     if area < min_area:
-        #         x, y, w, h = cv2.boundingRect(contour)
-        #         if contour is primary:
-        #             outline_color = (0, 255, 0)
-        #             centers.append([int(x+w /2), int(y+h/2)])
-        #         else:
-        #             outline_color =(0, 255, 255)
-        #         cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
-
-
+        if color_center != None:
+            centers.append(color_center)
     return out, centers
 
 def draw_lines(frame, c1, c2):
@@ -192,6 +173,7 @@ color_error = cv2.getTrackbarPos("error", "Mask")
 while True:
     # read camera feed
     ret, frame = camera_feed.read()
+    bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     if not ret:
         break
 
@@ -204,7 +186,6 @@ while True:
     max_colors = get_max_colors(colors, color_error)
 
     drawings, centers = draw_boxes(drawings, min_colors, max_colors, min_area=min_area)
-
 
     # draw lines between boxes in order
     prev = None
@@ -225,7 +206,7 @@ while True:
     cv2.imshow("Camera Feed", drawings)
 
     # display detected regions in mask window
-    combined = combine_images(frame, min_colors, max_colors)
+    combined = display_masks(frame, min_colors, max_colors)
     cv2.imshow("Mask", combined)
 
     # keyboard controls
