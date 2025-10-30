@@ -15,7 +15,7 @@ def init():
     cv2.namedWindow("Camera Feed")
     cv2.namedWindow("Mask")
 
-    cv2.createTrackbar("error", 'Mask', 10, 25, lambda x: None)
+    cv2.createTrackbar("error", 'Mask', 25, 50, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
@@ -39,41 +39,115 @@ def combined_masks(frame, mins, maxs):
     mask = cv2.bitwise_or(m1, cv2.bitwise_or(m2, m3))
     return mask
 
-def find_largest_box(mask, min_area):
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    best = None
-    best_area = 0
-    for c in cnts:
-        area = cv2.contourArea(c)
-        if area >= min_area and area > best_area:
-            best = c
-            best_area = area
-    if best is None:
-        return None
-    x, y, w, h = cv2.boundingRect(best)
-    return (x, y, w, h)
+def draw_swatches(drawings, colors):
+    # swatches for picked colors
+    for i, (b, g, r) in enumerate(colors):
+        tl = (10 + i * 40, 10)
+        br = (10 + i * 40 + 30, 40)
+        cv2.rectangle(drawings, tl, br, (int(b), int(g), int(r)), -1)
+    return drawings
 
-def boxes_by_color(frame, mins, maxs, min_area):
-    result = []
-    for i in range(len(mins)):
-        m = eyw.create_mask(frame, mins[i], maxs[i])
-        box = find_largest_box(m, min_area=min_area)
-        result.append(box)
-    return result
+def import_colors(data):
+    with open(data, 'r') as f:
+        colors = json.loads(f.readline())
+    return colors
 
-def get_center(box):
-    x, y, w, h = box
-    return int(x + w / 2), int(y + h / 2)
+def save_colors(colors):
+    # create file names
+    save_name = input("Enter a filename to save as or leave blank to use default name: ")
+    if save_name == "":
+        save_name = "colorValues"
+    txt_file = save_name + '.txt'
 
-def draw_line(image, box1, box2):
-    out = image.copy()
-    c1 = get_center(box1)
-    c2 = get_center(box2)
+    # ensure file names don't exist
+    index = 0
+    while os.path.isfile(txt_file):
+        txt_file = save_name + str(index) + '.txt'
+        index += 1
 
+    # write files
+    with open(txt_file, 'w') as f:
+        json.dump(colors, f)
+
+def draw_boxes(frame, color_min, color_max, min_area):
+    centers = []
+    out = frame.copy()
+
+    for color in range(3):
+        mask = eyw.create_mask(frame, color_min[color], color_max[color])
+        # clean speckle to stabilize contours
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        primary = get_largest_box(contours, min_area)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area:
+                continue
+
+            x, y, w, h = cv2.boundingRect(contour)
+            is_primary = (contour is primary)
+            outline_color = (0, 255, 0) if is_primary else (0, 255, 255)
+            cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
+
+            if is_primary:
+                color_center = (int(x + w / 2), int(y + h / 2))
+
+        centers.append(color_center)
+        # for contour in contours:
+        #     area = cv2.contourArea(contour)
+        #     if area < min_area:
+        #         x, y, w, h = cv2.boundingRect(contour)
+        #         if contour is primary:
+        #             outline_color = (0, 255, 0)
+        #             centers.append([int(x+w /2), int(y+h/2)])
+        #         else:
+        #             outline_color =(0, 255, 255)
+        #         cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
+
+
+    return out, centers
+
+def draw_lines(frame, c1, c2):
+    out = frame.copy()
     cv2.line(out, c1, c2, (0, 0, 255), 2, cv2.LINE_AA)
     cv2.circle(out, c1, 4, (255, 255, 255), -1)
     cv2.circle(out, c2, 4, (255, 255, 255), -1)
     return out
+
+def get_largest_box(contours, min_area):
+    best = None
+    best_area = min_area
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > best_area:
+            best = contour
+            best_area = area
+    return best
+
+def get_min_colors(colors, error):
+    # for (b, g, r) in colors:
+    #     minb = max(color_error, b) - color_error
+    #     ming = max(color_error, g) - color_error
+    #     minr = max(color_error, r) - color_error
+    # print(minb, ming, minr)
+    # return [minb, ming, minr]
+    arr = np.asarray(colors, dtype=int)  # shape: (3,3) for 3 colors
+    lower = np.clip(arr - error, 0, 255).tolist()
+    return lower
+
+def get_max_colors(colors, error):
+    # for (b, g, r) in colors:
+    #     maxb = min(255 - color_error, b) + color_error
+    #     maxg = min(255 - color_error, g) + color_error
+    #     maxr = min(255 - color_error, r) + color_error
+    # print(maxb, maxg, maxr)
+    # return [maxb, maxg, maxr]
+    arr = np.asarray(colors, dtype=int)  # shape: (3,3) for 3 colors
+    upper = np.clip(arr + error, 0, 255).tolist()  # list of 3 [B,G,R]
+    return upper
 
 def angle_between_lines(p1, p2, p3):
     v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
@@ -110,31 +184,9 @@ def compute_chain_angle(centers, i=0, j=1, k=2):
         return None
     return angle_between_lines(centers[i], centers[j], centers[k])
 
-def import_colors(data):
-    with open(data, 'r') as f:
-        colors = json.loads(f.readline())
-    return colors
-
-def save_colors(colors):
-    # create file names
-    save_name = input("Enter a filename to save as or leave blank to use default name: ")
-    if save_name == "":
-        save_name = "colorValues"
-    txt_file = save_name + '.txt'
-
-    # ensure file names don't exist
-    index = 0
-    while os.path.isfile(txt_file):
-        txt_file = save_name + str(index) + '.txt'
-        index += 1
-
-    # write files
-    with open(txt_file, 'w') as f:
-        json.dump(colors, f)
-
 init()
 
-colors = [[0,0,0], [0,0,0], [0,0,0]]
+colors = [[20,20,20], [0,0,0], [0,0,0]]
 color_error = cv2.getTrackbarPos("error", "Mask")
 
 while True:
@@ -144,50 +196,22 @@ while True:
         break
 
     drawings = frame.copy()
-
-    # crosshair
-    cv2.circle(drawings, (mouseX, mouseY), 4, (0, 255, 0), -1)
-    # swatches for picked colors
-    for i, (b, g, r) in enumerate(colors):
-        tl = (10 + i * 70, 10)
-        br = (10 + i * 70 + 60, 40)
-        cv2.rectangle(drawings, tl, br, (int(b), int(g), int(r)), -1)
-        cv2.rectangle(drawings, tl, br, (255, 255, 255), 1)
     cv2.imshow("Camera Feed", frame)
 
     min_area = cv2.getTrackbarPos("min-area", "Mask") * 50
-
-    # get box by color order
     color_error = cv2.getTrackbarPos("error", "Mask")
-    per_color_boxes = boxes_by_color(frame,
-                                     [[max(color_error, b) - color_error,
-                                       max(color_error, g) - color_error,
-                                       max(color_error, r) - color_error] for (b, g, r) in colors],
-                                     [[min(255-color_error, b) + color_error,
-                                       min(255-color_error, g) + color_error,
-                                       min(255-color_error, r) + color_error] for (b, g, r) in colors],
-                                     min_area=min_area)
+    min_colors = get_min_colors(colors, color_error)
+    max_colors = get_max_colors(colors, color_error)
 
-    centers = []
+    drawings, centers = draw_boxes(drawings, min_colors, max_colors, min_area=min_area)
 
-    # draw boxes
-    for box in per_color_boxes:
-        if box is None:
-            centers.append(None)
-            continue
-        x, y, w, h = box
-        cv2.rectangle(drawings, (x, y), (x + w, y + h), (0, 255, 255), 2)
-        centers.append(get_center(box))
 
     # draw lines between boxes in order
-    prev_center = None
-    for c in centers:
-        if prev_center is not None and c is not None:
-            # Create tiny "boxes" around centers to reuse drawLine()
-            bx_prev = (prev_center[0]-1, prev_center[1]-1, 2, 2)
-            bx_curr = (c[0]-1, c[1]-1, 2, 2)
-            drawings = draw_line(drawings, bx_prev, bx_curr)
-        prev_center = c
+    prev = None
+    for center in centers:
+        if prev is not None and center is not None:
+            drawings = draw_lines(drawings, prev, center)
+        prev = center
 
     # get angle between lines
     angle = compute_chain_angle(centers, 0, 1, 2)
@@ -197,26 +221,17 @@ while True:
         cv2.putText(drawings, f"{angle:.1f} deg",
                     label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
+    drawings = draw_swatches(drawings, colors)
     cv2.imshow("Camera Feed", drawings)
 
     # display detected regions in mask window
-    combined = combine_images(frame,
-                              [[max(color_error, b) - color_error,
-                                max(color_error, g) - color_error,
-                                max(color_error, r) - color_error] for (b, g, r) in colors],
-                              [[min(255 - color_error, b) + color_error,
-                                min(255 - color_error, g) + color_error,
-                                min(255 - color_error, r) + color_error] for (b, g, r) in colors])
+    combined = combine_images(frame, min_colors, max_colors)
     cv2.imshow("Mask", combined)
 
     # keyboard controls
     keypressed = cv2.waitKey(1)
-    if keypressed == ord('1'):
-        colors[0][0], colors[0][1], colors[0][2] = frame[mouseY, mouseX]
-    if keypressed == ord('2'):
-        colors[1][0], colors[1][1], colors[1][2] = frame[mouseY, mouseX]
-    if keypressed == ord('3'):
-        colors[2][0], colors[2][1], colors[2][2] = frame[mouseY, mouseX]
+    if keypressed == ord('1') or keypressed == ord('2') or keypressed == ord('3'):
+        colors[int(chr(keypressed))-1][0], colors[int(chr(keypressed))-1][1], colors[int(chr(keypressed))-1][2] = frame[mouseY, mouseX]
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
