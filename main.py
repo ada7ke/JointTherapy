@@ -1,4 +1,4 @@
-#todo - lighting correction, get target angles
+#todo - hsv, lighting correction, get target angles, hsv error
 import cv2, eyw, os.path, json
 import numpy as np
 
@@ -18,30 +18,33 @@ def init():
     cv2.namedWindow("Mask")
 
     # create trackbars for fine tuning
-    cv2.createTrackbar("error", 'Mask', 25, 50, lambda x: None)
+    cv2.createTrackbar("error", 'Mask', 10, 50, lambda x: None)
+    cv2.createTrackbar("hue-error", 'Mask', 10, 50, lambda x: None)
+    cv2.createTrackbar("sat-error", 'Mask', 25, 50, lambda x: None)
+    cv2.createTrackbar("vib-error", 'Mask', 25, 50, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
     # initialize getting mouse position
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
 
-def display_masks(frame, min, max):
-    # display masks for mask window
-    mask1 = eyw.create_mask(frame, min[0], max[0])
-    mask2 = eyw.create_mask(frame, min[1], max[1])
-    mask3 = eyw.create_mask(frame, min[2], max[2])
-    masked_image1 = eyw.apply_mask(frame, mask1)
-    masked_image2 = eyw.apply_mask(frame, mask2)
-    masked_image3 = eyw.apply_mask(frame, mask3)
-    combined = eyw.combine_images(masked_image1, masked_image2)
-    combined = eyw.combine_images(combined, masked_image3)
-    return combined
+def display_masks(frame, hsv_frame, mins, maxs):
+    mins = np.asarray(mins, dtype=np.uint8)
+    maxs = np.asarray(maxs, dtype=np.uint8)
 
-def draw_swatches(drawings, colors):
+    mask1 = cv2.inRange(hsv, np.array(mins[0]), np.array(maxs[0]))
+    mask2 = cv2.inRange(hsv, np.array(mins[1]), np.array(maxs[1]))
+    mask3 = cv2.inRange(hsv, np.array(mins[2]), np.array(maxs[2]))
+
+    combined_mask = mask1 | mask2 | mask3
+    return cv2.bitwise_and(frame, frame, mask=combined_mask)
+
+def draw_swatches(drawings, hsv_colors):
     # display swatches for picked colors in top left corner of window
-    for i, (b, g, r) in enumerate(colors):
+    for i, (h, s, v) in enumerate(hsv_colors):
+        bgr = cv2.cvtColor(np.uint8([[[int(h), int(s), int(v)]]]), cv2.COLOR_HSV2BGR)[0, 0]
         tl = (10 + i * 40, 10)
         br = (10 + i * 40 + 30, 40)
-        cv2.rectangle(drawings, tl, br, (int(b), int(g), int(r)), -1)
+        cv2.rectangle(drawings, tl, br, tuple(int(c) for c in bgr), -1)
     return drawings
 
 def import_colors(data):
@@ -66,34 +69,39 @@ def save_colors(colors):
     with open(txt_file, 'w') as f:
         json.dump(colors, f)
 
-def draw_boxes(frame, color_min, color_max, min_area):
+def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_area):
     centers = []
-    out = frame.copy()
+    out = draw_on_bgr.copy()
 
-    for color in range(3):
-        mask = eyw.create_mask(frame, color_min[color], color_max[color])
+    for i in range(3):
+        mask = cv2.inRange(hsv_frame, np.array(color_min[i], dtype=np.uint8),
+                                      np.array(color_max[i], dtype=np.uint8))
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         primary = get_largest_box(contours, min_area)
         color_center = None
+
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > min_area:
-                x, y, w, h = cv2.boundingRect(contour)
-                if contour is primary:
-                    outline_color = (0, 255, 0)
-                    color_center = (int(x + w / 2), int(y + h / 2))
-                else:
-                    outline_color = (0, 255, 255)
-                cv2.rectangle(out, (x, y), (x + w, y + h), outline_color, 2)
+            if area <= min_area:
+                continue
 
-        if color_center != None:
+            x, y, w, h = cv2.boundingRect(contour)
+            is_primary = (contour is primary)
+            outline = (0, 255, 0) if is_primary else (0, 255, 255)
+            cv2.rectangle(out, (x, y), (x + w, y + h), outline, 2)
+
+            if is_primary:
+                color_center = (int(x + w/2), int(y + h/2))
+
+        if color_center is not None:
             centers.append(color_center)
+
     return out, centers
 
 def draw_lines(frame, c1, c2):
     out = frame.copy()
-    cv2.line(out, c1, c2, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.line(out, c1, c2, (255, 0, 0), 2, cv2.LINE_AA)
     cv2.circle(out, c1, 4, (255, 255, 255), -1)
     cv2.circle(out, c2, 4, (255, 255, 255), -1)
     return out
@@ -109,26 +117,20 @@ def get_largest_box(contours, min_area):
     return best
 
 def get_min_colors(colors, error):
-    # for (b, g, r) in colors:
-    #     minb = max(color_error, b) - color_error
-    #     ming = max(color_error, g) - color_error
-    #     minr = max(color_error, r) - color_error
-    # print(minb, ming, minr)
-    # return [minb, ming, minr]
-    arr = np.asarray(colors, dtype=int)  # shape: (3,3) for 3 colors
-    lower = np.clip(arr - error, 0, 255).tolist()
-    return lower
+    arr = np.asarray(colors, dtype=int)
+    lower = arr - error
+    lower[:, 0] = np.clip(lower[:, 0], 0, 179)  # H
+    lower[:, 1] = np.clip(lower[:, 1], 0, 255)  # S
+    lower[:, 2] = np.clip(lower[:, 2], 0, 255)  # V
+    return lower.astype(np.uint8)
 
 def get_max_colors(colors, error):
-    # for (b, g, r) in colors:
-    #     maxb = min(255 - color_error, b) + color_error
-    #     maxg = min(255 - color_error, g) + color_error
-    #     maxr = min(255 - color_error, r) + color_error
-    # print(maxb, maxg, maxr)
-    # return [maxb, maxg, maxr]
-    arr = np.asarray(colors, dtype=int)  # shape: (3,3) for 3 colors
-    upper = np.clip(arr + error, 0, 255).tolist()  # list of 3 [B,G,R]
-    return upper
+    arr = np.asarray(colors, dtype=int)
+    upper = arr + error
+    upper[:, 0] = np.clip(upper[:, 0], 0, 179)  # H
+    upper[:, 1] = np.clip(upper[:, 1], 0, 255)  # S
+    upper[:, 2] = np.clip(upper[:, 2], 0, 255)  # V
+    return upper.astype(np.uint8)
 
 def angle_between_lines(p1, p2, p3):
     v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
@@ -168,12 +170,14 @@ def compute_chain_angle(centers, i=0, j=1, k=2):
 init()
 
 colors = [[20,20,20], [0,0,0], [0,0,0]]
-color_error = cv2.getTrackbarPos("error", "Mask")
+error = [cv2.getTrackbarPos("hue-error", "Mask"),
+    cv2.getTrackbarPos("hue-error", "Mask"),
+    cv2.getTrackbarPos("hue-error", "Mask")]
 
 while True:
     # read camera feed
     ret, frame = camera_feed.read()
-    bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     if not ret:
         break
 
@@ -185,7 +189,7 @@ while True:
     min_colors = get_min_colors(colors, color_error)
     max_colors = get_max_colors(colors, color_error)
 
-    drawings, centers = draw_boxes(drawings, min_colors, max_colors, min_area=min_area)
+    drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_area=min_area)
 
     # draw lines between boxes in order
     prev = None
@@ -200,19 +204,20 @@ while True:
         # label near the middle point if it exists, else fallback corner
         label_pos = centers[1] if centers[1] is not None else (20, 40)
         cv2.putText(drawings, f"{angle:.1f} deg",
-                    label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
     drawings = draw_swatches(drawings, colors)
     cv2.imshow("Camera Feed", drawings)
 
     # display detected regions in mask window
-    combined = display_masks(frame, min_colors, max_colors)
+    combined = display_masks(frame, hsv, min_colors, max_colors)
     cv2.imshow("Mask", combined)
 
     # keyboard controls
     keypressed = cv2.waitKey(1)
     if keypressed == ord('1') or keypressed == ord('2') or keypressed == ord('3'):
-        colors[int(chr(keypressed))-1][0], colors[int(chr(keypressed))-1][1], colors[int(chr(keypressed))-1][2] = frame[mouseY, mouseX]
+        color_index = int(chr(keypressed)) - 1
+        colors[color_index] = list(map(int, hsv[mouseY, mouseX]))
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
