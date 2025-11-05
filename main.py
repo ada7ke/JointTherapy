@@ -1,4 +1,4 @@
-#todo - hsv, lighting correction, get target angles, hsv error, save error in data
+#todo - select swatch for hsv errors, lighting correction, get target angles, save error in data
 import cv2, eyw, os.path, json
 import numpy as np
 
@@ -18,10 +18,9 @@ def init():
     cv2.namedWindow("Mask")
 
     # create trackbars for fine tuning
-    cv2.createTrackbar("error", 'Mask', 10, 50, lambda x: None)
-    cv2.createTrackbar("hue-error", 'Mask', 10, 50, lambda x: None)
+    cv2.createTrackbar("hue-error", 'Mask', 10, 25, lambda x: None)
     cv2.createTrackbar("sat-error", 'Mask', 25, 50, lambda x: None)
-    cv2.createTrackbar("val-error", 'Mask', 25, 50, lambda x: None)
+    cv2.createTrackbar("val-error", 'Mask', 25, 100, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
     # initialize getting mouse position
@@ -118,20 +117,22 @@ def get_largest_box(contours, min_area):
             best_area = area
     return best
 
-def get_min_colors(colors, error):
+def get_min_colors(colors, errors):
     arr = np.asarray(colors, dtype=int)
-    lower = arr - error
-    lower[:, 0] = np.clip(lower[:, 0], 0, 179)  # H
-    lower[:, 1] = np.clip(lower[:, 1], 0, 255)  # S
-    lower[:, 2] = np.clip(lower[:, 2], 0, 255)  # V
+    dH, dS, dV = errors
+    lower = arr.copy()
+    lower[:, 0] = np.clip(arr[:, 0] - dH, 0, 179)
+    lower[:, 1] = np.clip(arr[:, 1] - dS, 0, 255)
+    lower[:, 2] = np.clip(arr[:, 2] - dV, 0, 255)
     return lower.astype(np.uint8)
 
-def get_max_colors(colors, error):
+def get_max_colors(colors, errors):
     arr = np.asarray(colors, dtype=int)
-    upper = arr + error
-    upper[:, 0] = np.clip(upper[:, 0], 0, 179)  # H
-    upper[:, 1] = np.clip(upper[:, 1], 0, 255)  # S
-    upper[:, 2] = np.clip(upper[:, 2], 0, 255)  # V
+    dH, dS, dV = errors
+    upper = arr.copy()
+    upper[:, 0] = np.clip(arr[:, 0] + dH, 0, 179)
+    upper[:, 1] = np.clip(arr[:, 1] + dS, 0, 255)
+    upper[:, 2] = np.clip(arr[:, 2] + dV, 0, 255)
     return upper.astype(np.uint8)
 
 def angle_between_lines(p1, p2, p3):
@@ -172,9 +173,6 @@ def compute_chain_angle(centers, i=0, j=1, k=2):
 init()
 
 colors = [[20,20,20], [0,0,0], [0,0,0]]
-error = [cv2.getTrackbarPos("hue-error", "Mask"),
-    cv2.getTrackbarPos("hue-error", "Mask"),
-    cv2.getTrackbarPos("hue-error", "Mask")]
 
 while True:
     # read camera feed
@@ -187,9 +185,11 @@ while True:
     cv2.imshow("Camera Feed", frame)
 
     min_area = cv2.getTrackbarPos("min-area", "Mask") * 50
-    color_error = cv2.getTrackbarPos("error", "Mask")
-    min_colors = get_min_colors(colors, color_error)
-    max_colors = get_max_colors(colors, color_error)
+    error = [cv2.getTrackbarPos("hue-error", "Mask"),
+             cv2.getTrackbarPos("sat-error", "Mask"),
+             cv2.getTrackbarPos("val-error", "Mask")]
+    min_colors = get_min_colors(colors, error)
+    max_colors = get_max_colors(colors, error)
 
     drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_area=min_area)
 
