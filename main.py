@@ -21,7 +21,7 @@ def init():
     cv2.createTrackbar("error", 'Mask', 10, 50, lambda x: None)
     cv2.createTrackbar("hue-error", 'Mask', 10, 50, lambda x: None)
     cv2.createTrackbar("sat-error", 'Mask', 25, 50, lambda x: None)
-    cv2.createTrackbar("vib-error", 'Mask', 25, 50, lambda x: None)
+    cv2.createTrackbar("val-error", 'Mask', 25, 50, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
 
     # initialize getting mouse position
@@ -45,7 +45,7 @@ def draw_swatches(drawings, hsv_colors):
         tl = (10 + i * 40, 10)
         br = (10 + i * 40 + 30, 40)
         cv2.rectangle(drawings, tl, br, tuple(int(c) for c in bgr), -1)
-        cv2.putText(drawings, str(i), (30 + i*40, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2.5)
+        cv2.putText(drawings, str(i), (20 + i*40, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
     return drawings
 
 def import_colors(data):
