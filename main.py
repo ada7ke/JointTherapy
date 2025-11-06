@@ -1,4 +1,4 @@
-#todo - select swatch for min error, lighting correction, get target angles, save error in data
+#todo - lighting correction, get target angles, save error in data
 import cv2, eyw, os.path, json
 import numpy as np
 
@@ -19,10 +19,10 @@ def init():
 
     # create trackbars for fine tuning
     cv2.createTrackbar("select-swatch", "Mask", 0, 2, lambda x: None)
-    cv2.createTrackbar("hue-error", "Mask", 10, 25, lambda x: None)
-    cv2.createTrackbar("sat-error", "Mask", 25, 50, lambda x: None)
-    cv2.createTrackbar("val-error", "Mask", 25, 100, lambda x: None)
-    cv2.createTrackbar("min-area", "Mask", 5, 10, lambda x: None)
+    cv2.createTrackbar("hue-error", "Mask", 10, 50, lambda x: None)
+    cv2.createTrackbar("sat-error", "Mask", 25, 200, lambda x: None)
+    cv2.createTrackbar("val-error", "Mask", 25, 200, lambda x: None)
+    cv2.createTrackbar("min-area", "Mask", 5, 50, lambda x: None)
 
     # initialize getting mouse position
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
@@ -51,14 +51,15 @@ def draw_swatches(drawings, hsv_colors):
 def import_colors(data):
     with open(data, 'r') as f:
         colors = json.loads(f.readline())
-        # error = json.loads(f.readline())
-    return colors
+        errors = json.loads(f.readline())
+        min_areas = json.loads(f.readline())
+    return colors, errors, min_areas
 
-def save_colors(colors):
+def save_colors(colors, errors, min_areas):
     # create file names
     save_name = input("Enter a filename to save as or leave blank to use default name: ")
     if save_name == "":
-        save_name = "colorValues"
+        save_name = "data"
     txt_file = save_name + '.txt'
 
     # ensure file names don't exist
@@ -70,6 +71,10 @@ def save_colors(colors):
     # write files
     with open(txt_file, 'w') as f:
         json.dump(colors, f)
+        f.write("\n")
+        json.dump(errors, f)
+        f.write("\n")
+        json.dump(min_areas, f)
 
 def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas):
     centers = []
@@ -236,12 +241,12 @@ while True:
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
-            colors = import_colors(data)
+            colors, errors, min_areas = import_colors(data)
             print("Imported!")
         else:
             print("The filename was invalid")
     if keypressed == ord('s'):
-        save_colors(colors)
+        save_colors(colors, errors, min_areas)
         print("Saved!")
     if keypressed == 27:
         break
