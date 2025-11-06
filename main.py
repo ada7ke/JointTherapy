@@ -71,7 +71,7 @@ def save_colors(colors):
     with open(txt_file, 'w') as f:
         json.dump(colors, f)
 
-def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_area):
+def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas):
     centers = []
     out = draw_on_bgr.copy()
 
@@ -80,12 +80,12 @@ def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_area):
                                       np.array(color_max[i], dtype=np.uint8))
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        primary = get_largest_box(contours, min_area)
+        primary = get_largest_box(contours, min_areas[i])
         color_center = None
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area <= min_area:
+            if area <= min_areas[i]:
                 continue
 
             x, y, w, h = cv2.boundingRect(contour)
@@ -177,7 +177,8 @@ init()
 
 temp = -1
 colors = [[20,20,20], [0,0,0], [0,0,0]]
-error = [[15, 25, 50] for _ in range(3)]
+errors = [[15, 25, 50] for _ in range(3)]
+min_areas = [250 for _ in range(3)]
 
 while True:
     # read camera feed
@@ -189,20 +190,21 @@ while True:
     drawings = frame.copy()
     cv2.imshow("Camera Feed", frame)
 
-    min_area = cv2.getTrackbarPos("min-area", "Mask") * 50
     swatch_select = cv2.getTrackbarPos("select-swatch", "Mask")
     if swatch_select != temp:
-        cv2.setTrackbarPos("hue-error", "Mask", error[swatch_select][0])
-        cv2.setTrackbarPos("sat-error", "Mask", error[swatch_select][1])
-        cv2.setTrackbarPos("val-error", "Mask", error[swatch_select][2])
+        cv2.setTrackbarPos("hue-error", "Mask", errors[swatch_select][0])
+        cv2.setTrackbarPos("sat-error", "Mask", errors[swatch_select][1])
+        cv2.setTrackbarPos("val-error", "Mask", errors[swatch_select][2])
+        cv2.setTrackbarPos("min-area", "Mask", int(min_areas[swatch_select]/50))
         temp = swatch_select
-    error[swatch_select] = [cv2.getTrackbarPos("hue-error", "Mask"),
+    errors[swatch_select] = [cv2.getTrackbarPos("hue-error", "Mask"),
                             cv2.getTrackbarPos("sat-error", "Mask"),
                             cv2.getTrackbarPos("val-error", "Mask")]
-    min_colors = get_min_colors(colors, error)
-    max_colors = get_max_colors(colors, error)
+    min_areas[swatch_select] = cv2.getTrackbarPos("min-area", "Mask") * 50
+    min_colors = get_min_colors(colors, errors)
+    max_colors = get_max_colors(colors, errors)
 
-    drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_area=min_area)
+    drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas=min_areas)
 
     # draw lines between boxes in order
     prev = None
