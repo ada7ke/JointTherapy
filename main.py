@@ -1,4 +1,4 @@
-#todo - lighting correction, get target angles, save error in data
+#todo - lighting correction, get target angles
 import cv2, eyw, os.path, json
 import numpy as np
 
@@ -16,6 +16,10 @@ def init():
     # create windows
     cv2.namedWindow("Camera Feed")
     cv2.namedWindow("Mask")
+
+    # create trackbars for getting angles
+    cv2.createTrackbar("min-angle", "Camera Feed", 0, 180, lambda x: None)
+    cv2.createTrackbar("max-angle", "Camera Feed", 120, 180, lambda x: None)
 
     # create trackbars for fine tuning
     cv2.createTrackbar("select-swatch", "Mask", 0, 2, lambda x: None)
@@ -106,8 +110,8 @@ def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas):
 
     return out, centers
 
-def draw_lines(frame, c1, c2):
-    out = frame.copy()
+def draw_lines(drawings, c1, c2):
+    out = drawings.copy()
     cv2.line(out, c1, c2, (255, 0, 0), 2, cv2.LINE_AA)
     cv2.circle(out, c1, 4, (255, 255, 255), -1)
     cv2.circle(out, c2, 4, (255, 255, 255), -1)
@@ -161,10 +165,10 @@ def angle_between_lines(p1, p2, p3):
     angle_deg = np.degrees(angle_rad)
     return angle_deg
 
-def have_all_centers(centers, indexs):
+def have_all_centers(centers, indexes):
     """Return True only if every centers[i] exists and the segments have non-zero length."""
     pts = []
-    for i in indexs:
+    for i in indexes:
         if i >= len(centers) or centers[i] is None:
             return False
         pts.append(centers[i])
@@ -178,12 +182,69 @@ def compute_chain_angle(centers, i=0, j=1, k=2):
         return None
     return angle_between_lines(centers[i], centers[j], centers[k])
 
+def inRange(currentAngle, targetAngle):
+    return targetAngle-10 < currentAngle < targetAngle+10
+
+def display_instructions(drawings, angle, min_angle, max_angle, direction, armed, tol, hysteresis):
+    out = drawings.copy()
+
+    if angle is None:
+        cv2.putText(out, "Finding targets...", (50, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        return out, direction, armed
+
+    if min_angle > max_angle:
+        min_angle, max_angle = max_angle, min_angle
+
+    # EXTEND phase
+    if direction == -1:
+        # Flip only if armed and within tol near max
+        if armed and angle >= max_angle - tol:
+            direction = 1
+            armed = False
+            cv2.putText(out, "Target reached. Now bend", (50, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            cv2.putText(out, "Extend arm", (50, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+        # Re-arm after moving away from the flip band
+        if not armed and angle <= max_angle - tol - hysteresis:
+            armed = True
+
+        if angle > max_angle + tol:
+            cv2.putText(out, "WARNING. Over-extended", (50, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+    # BEND phase
+    elif direction == 1:
+        if armed and angle <= min_angle + tol:
+            direction = -1
+            armed = False
+            cv2.putText(out, "Target reached. Now extend", (50, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            cv2.putText(out, "Bend arm", (50, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+        if not armed and angle >= min_angle + tol + hysteresis:
+            armed = True
+
+        if angle < min_angle - tol:
+            cv2.putText(out, "WARNING. Over-bent", (50, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+    return out, direction, armed
+
+
 init()
 
 temp = -1
 colors = [[20,20,20], [0,0,0], [0,0,0]]
 errors = [[15, 25, 50] for _ in range(3)]
 min_areas = [250 for _ in range(3)]
+direction = 1
+armed = True
 
 while True:
     # read camera feed
@@ -220,11 +281,16 @@ while True:
 
     # get angle between lines
     angle = compute_chain_angle(centers, 0, 1, 2)
+    min_angle = cv2.getTrackbarPos("min-angle", "Camera Feed")
+    max_angle = cv2.getTrackbarPos("max-angle", "Camera Feed")
+
     if angle is not None:
-        # label near the middle point if it exists, else fallback corner
-        label_pos = centers[1] if centers[1] is not None else (20, 40)
+        label_pos = centers[1] if len(centers) > 1 and centers[1] is not None else (20, 40)
         cv2.putText(drawings, f"{angle:.1f} deg",
                     label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    drawings, direction, armed = display_instructions(
+        drawings, angle, min_angle, max_angle, direction, armed, tol=30, hysteresis=8)
 
     drawings = draw_swatches(drawings, colors)
     cv2.imshow("Camera Feed", drawings)
