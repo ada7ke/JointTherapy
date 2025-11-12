@@ -43,13 +43,13 @@ def display_masks(frame, hsv_frame, mins, maxs):
     return cv2.bitwise_and(frame, frame, mask=combined_mask)
 
 def draw_swatches(drawings, hsv_colors):
-    # display swatches for picked colors in top left corner of window\
+    # display swatches for picked colors in top left corner of window
     for i, (h, s, v) in enumerate(hsv_colors):
         bgr = cv2.cvtColor(np.uint8([[[int(h), int(s), int(v)]]]), cv2.COLOR_HSV2BGR)[0, 0]
         tl = (10 + i * 40, 10)
         br = (10 + i * 40 + 30, 40)
         cv2.rectangle(drawings, tl, br, tuple(int(c) for c in bgr), -1)
-        cv2.putText(drawings, str(i), (20 + i*40, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+        cv2.putText(drawings, str(i+1), (20 + i*40, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
     return drawings
 
 def import_colors(data):
