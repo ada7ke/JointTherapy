@@ -57,9 +57,18 @@ def import_colors(data):
         colors = json.loads(f.readline())
         errors = json.loads(f.readline())
         min_areas = json.loads(f.readline())
-    return colors, errors, min_areas
+        min_angle = json.loads(f.readline())
+        max_angle = json.loads(f.readline())
+        cv2.setTrackbarPos("select-swatch", "Masks", 0)
+        cv2.setTrackbarPos("hue-error", "Masks", errors[0])
+        cv2.setTrackbarPos("sat-error", "Masks", errors[1])
+        cv2.setTrackbarPos("val-error", "Masks", errors[2])
+        cv2.setTrackbarPos("min-area", "Masks", min_areas[0])
+        cv2.setTrackbarPos("min-angle", "Camera Feed", min_angle)
+        cv2.setTrackbarPos("max-angle", "Camera Feed", max_angle)
+    return colors, errors, min_areas, min_angle, max_angle
 
-def save_colors(colors, errors, min_areas):
+def save_colors(colors, errors, min_areas, min_angle, max_angle):
     # create file names
     save_name = input("Enter a filename to save as or leave blank to use default name: ")
     if save_name == "":
@@ -79,6 +88,10 @@ def save_colors(colors, errors, min_areas):
         json.dump(errors, f)
         f.write("\n")
         json.dump(min_areas, f)
+        f.write("\n")
+        json.dump(min_angle, f)
+        f.write("\n")
+        json.dump(max_angle, f)
 
 def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas):
     centers = []
@@ -307,12 +320,12 @@ while True:
     if keypressed == ord('i'):
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
-            colors, errors, min_areas = import_colors(data)
+            colors, errors, min_areas, min_angle, max_angle = import_colors(data)
             print("Imported!")
         else:
             print("The filename was invalid")
     if keypressed == ord('s'):
-        save_colors(colors, errors, min_areas)
+        save_colors(colors, errors, min_areas, min_angle, max_angle)
         print("Saved!")
     if keypressed == 27:
         break
