@@ -54,11 +54,14 @@ def draw_swatches(drawings, hsv_colors):
 
 def import_colors(data):
     with open(data, 'r') as f:
+        # read data
         colors = json.loads(f.readline())
         errors = json.loads(f.readline())
         min_areas = json.loads(f.readline())
         min_angle = json.loads(f.readline())
         max_angle = json.loads(f.readline())
+
+        # update trackbars
         cv2.setTrackbarPos("select-swatch", "Masks", 0)
         cv2.setTrackbarPos("hue-error", "Masks", errors[0])
         cv2.setTrackbarPos("sat-error", "Masks", errors[1])
