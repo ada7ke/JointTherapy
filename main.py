@@ -172,23 +172,20 @@ def display_instructions(drawings, angle, min_angle, max_angle, direction, armed
     out = drawings.copy()
 
     if angle is None:
-        cv2.putText(out, "Finding targets...", (50, 40),
+        cv2.putText(out, "Finding targets...", (10, 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
         return out, direction, armed
 
-    if min_angle > max_angle:
-        min_angle, max_angle = max_angle, min_angle
-
     # EXTEND phase
-    if direction == -1:
+    if direction == 1:
         # Flip only if armed and within tol near max
         if armed and angle >= max_angle - tol:
-            direction = 1
+            direction = -1
             armed = False
-            cv2.putText(out, "Target reached. Now bend", (50, 40),
+            cv2.putText(out, "Target reached. Now bend", (10, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            cv2.putText(out, "Extend arm", (50, 40),
+            cv2.putText(out, "Extend arm", (10, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
         # Re-arm after moving away from the flip band
@@ -196,25 +193,25 @@ def display_instructions(drawings, angle, min_angle, max_angle, direction, armed
             armed = True
 
         if angle > max_angle + tol:
-            cv2.putText(out, "WARNING. Over-extended", (50, 80),
+            cv2.putText(out, "WARNING: DO NOT EXTEND FURTHER", (10, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
     # BEND phase
-    elif direction == 1:
+    elif direction == -1:
         if armed and angle <= min_angle + tol:
-            direction = -1
+            direction = 1
             armed = False
-            cv2.putText(out, "Target reached. Now extend", (50, 40),
+            cv2.putText(out, "Target reached. Now extend", (10, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            cv2.putText(out, "Bend arm", (50, 40),
+            cv2.putText(out, "Bend arm", (10, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
         if not armed and angle >= min_angle + tol + hysteresis:
             armed = True
 
         if angle < min_angle - tol:
-            cv2.putText(out, "WARNING. Over-bent", (50, 80),
+            cv2.putText(out, "WARNING: DO NOT BEND FURTHER", (10, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
     return out, direction, armed
@@ -297,7 +294,7 @@ while True:
     # draw boxes
     min_colors = get_min_colors(colors, errors)
     max_colors = get_max_colors(colors, errors)
-    drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas, show_all=False)
+    drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas, show_all=True)
 
     # draw lines between boxes in order
     prev = None
