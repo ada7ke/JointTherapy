@@ -1,9 +1,12 @@
 #todo - lighting correction, instructions to bend and extend, audio warning
-import cv2, eyw, os.path, json
+import cv2, os.path, json, time
 import numpy as np
 
 camera_feed = cv2.VideoCapture(0)
-
+if not camera_feed.isOpened():
+    print("Cannot open camera")
+    exit()
+camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
 mouseX, mouseY = 0, 0
 
 def get_mouse_pos(event, x, y, flags, param):
@@ -22,7 +25,7 @@ def init():
     cv2.createTrackbar("max-angle", "Camera Feed", 120, 180, lambda x: None)
 
     # create trackbars for fine tuning
-    cv2.createTrackbar("select-swatch", "Mask", 0, 2, lambda x: None)
+    cv2.createTrackbar("select-swatch", "Mask", 0, 3, lambda x: None)
     cv2.createTrackbar("hue-error", "Mask", 10, 50, lambda x: None)
     cv2.createTrackbar("sat-error", "Mask", 25, 200, lambda x: None)
     cv2.createTrackbar("val-error", "Mask", 25, 200, lambda x: None)
@@ -30,6 +33,10 @@ def init():
 
     # initialize getting mouse position
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
+
+def adjust_exposure(frame, cap):
+    exposure_value = -4
+    cap.set(cv2.CAP_PROP_EXPOSURE, exposure_value)
 
 def display_masks(frame, hsv_frame, min_colors, max_colors):
     # combine masks
@@ -79,7 +86,7 @@ def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas, show_all
     centers = []
     out = draw_on_bgr.copy()
 
-    for i in range(3):
+    for i in range(4):
         mask = cv2.inRange(hsv_frame, np.array(color_min[i], dtype=np.uint8),
                                       np.array(color_max[i], dtype=np.uint8))
 
@@ -128,9 +135,9 @@ def draw_lines(drawings, c1, c2):
     cv2.circle(out, c2, 4, (255, 255, 255), -1)
     return out
 
-def angle_between_lines(p1, p2, p3):
+def angle_between_lines(p1, p2, p3, p4):
     v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
-    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+    v2 = np.array([p4[0] - p3[0], p4[1] - p3[1]])
 
     dot = np.dot(v1, v2)
     mag1 = np.linalg.norm(v1)
@@ -154,16 +161,16 @@ def have_all_centers(centers, indexes):
             return False
         pts.append(centers[i])
     # ensure non-zero-length legs: (i->j) and (j->k)
-    (x1,y1),(x2,y2),(x3,y3) = pts
+    (x1,y1),(x2,y2),(x3,y3),(x4,y4) = pts
 
     # return true if all centers exist and lengths aren't zero
-    return (x1, y1) != (x2, y2) and (x2, y2) != (x3, y3)
+    return (x1, y1) != (x2, y2) and (x3, y3) != (x4, y4)
 
-def compute_chain_angle(centers, i=0, j=1, k=2):
+def compute_chain_angle(centers):
     # get angle between segments or return None if missing
-    if not have_all_centers(centers, (i, j, k)):
+    if not have_all_centers(centers, (0, 1, 2, 3)):
         return None
-    return angle_between_lines(centers[i], centers[j], centers[k])
+    return angle_between_lines(centers[0], centers[1], centers[2], centers[3])
 
 def within_tol(currentAngle, targetAngle):
     return targetAngle-10 < currentAngle < targetAngle+10
@@ -222,14 +229,19 @@ def import_colors(data):
         colors = json.loads(f.readline())
         errors = json.loads(f.readline())
         min_areas = json.loads(f.readline())
-        min_angle = json.loads(f.readline())
-        max_angle = json.loads(f.readline())
+        # convert to ints
+        for i in range(4):
+            colors[i] = list(map(int, colors[i]))
+            errors[i] = list(map(int, errors[i]))
+        min_areas = list(map(int, min_areas))
+        min_angle = int(json.loads(f.readline()))
+        max_angle = int(json.loads(f.readline()))
 
         # update trackbars
         cv2.setTrackbarPos("select-swatch", "Mask", 0)
-        cv2.setTrackbarPos("hue-error", "Mask", errors[0])
-        cv2.setTrackbarPos("sat-error", "Mask", errors[1])
-        cv2.setTrackbarPos("val-error", "Mask", errors[2])
+        cv2.setTrackbarPos("hue-error", "Mask", errors[0][0])
+        cv2.setTrackbarPos("sat-error", "Mask", errors[0][1])
+        cv2.setTrackbarPos("val-error", "Mask", errors[0][2])
         cv2.setTrackbarPos("min-area", "Mask", min_areas[0])
         cv2.setTrackbarPos("min-angle", "Camera Feed", min_angle)
         cv2.setTrackbarPos("max-angle", "Camera Feed", max_angle)
@@ -260,13 +272,13 @@ def save_colors(colors, errors, min_areas, min_angle, max_angle):
         f.write("\n")
         json.dump(max_angle, f)
 
-
 init()
 
+colors = [[20,20,20], [0,0,0], [0,0,0], [0,0,0]]
+errors = [[15, 25, 50] for _ in range(4)]
+min_areas = [250 for _ in range(4)]
 temp = -1
-colors = [[20,20,20], [0,0,0], [0,0,0]]
-errors = [[15, 25, 50] for _ in range(3)]
-min_areas = [250 for _ in range(3)]
+
 direction = 1
 armed = True
 
@@ -304,7 +316,7 @@ while True:
         prev = center
 
     # get angle between lines
-    angle = compute_chain_angle(centers, 0, 1, 2)
+    angle = compute_chain_angle(centers)
     min_angle = cv2.getTrackbarPos("min-angle", "Camera Feed")
     max_angle = cv2.getTrackbarPos("max-angle", "Camera Feed")
 
@@ -330,7 +342,8 @@ while True:
 
     # keyboard controls
     keypressed = cv2.waitKey(1)
-    if keypressed == ord('1') or keypressed == ord('2') or keypressed == ord('3'):
+    swatch_keys = [ord('1'), ord('2'), ord('3'), ord('4')]
+    if keypressed in swatch_keys:
         color_index = int(chr(keypressed)) - 1
         colors[color_index] = list(map(int, hsv[mouseY, mouseX]))
     if keypressed == ord('i'):
