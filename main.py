@@ -41,7 +41,7 @@ def adjust_exposure(frame, cap):
 def display_masks(frame, hsv_frame, min_colors, max_colors):
     # combine masks
     masks = []
-    for i in range(3):
+    for i in range(4):
         masks.append(cv2.inRange(hsv_frame, min_colors[i], max_colors[i]))
     combined_mask = np.bitwise_or.reduce(masks)
 
@@ -308,12 +308,10 @@ while True:
     max_colors = get_max_colors(colors, errors)
     drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas, show_all=True)
 
-    # draw lines between boxes in order
-    prev = None
-    for center in centers:
-        if prev is not None and center is not None:
-            drawings = draw_lines(drawings, prev, center)
-        prev = center
+    # draw lines between boxes
+    if len(centers) == 4:
+        drawings = draw_lines(drawings, centers[0], centers[1])
+        drawings = draw_lines(drawings, centers[2], centers[3])
 
     # get angle between lines
     angle = compute_chain_angle(centers)
