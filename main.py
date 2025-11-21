@@ -3,11 +3,14 @@ import cv2, os.path, json, time
 import numpy as np
 
 # setup camera feed
-camera_feed = cv2.VideoCapture(0)
+camera_feed = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 if not camera_feed.isOpened():
-    print("Cannot open camera")
-    exit()
+    raise RuntimeError("Camera not found")
+time.sleep(0.5)
 camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, -5)
+print("AUTO_EXPOSURE:", camera_feed.get(cv2.CAP_PROP_AUTO_EXPOSURE))
+print("EXPOSURE:", camera_feed.get(cv2.CAP_PROP_EXPOSURE))
 
 mouseX, mouseY = 0, 0
 def get_mouse_pos(event, x, y, flags, param):
