@@ -1,4 +1,4 @@
-#todo - lighting correction, instructions to bend and extend, audio warning
+#todo - audio warning
 import cv2, os.path, json, time
 import numpy as np
 
@@ -6,11 +6,8 @@ import numpy as np
 camera_feed = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 if not camera_feed.isOpened():
     raise RuntimeError("Camera not found")
-time.sleep(0.5)
 camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
 camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, -5)
-print("AUTO_EXPOSURE:", camera_feed.get(cv2.CAP_PROP_AUTO_EXPOSURE))
-print("EXPOSURE:", camera_feed.get(cv2.CAP_PROP_EXPOSURE))
 
 mouseX, mouseY = 0, 0
 def get_mouse_pos(event, x, y, flags, param):
@@ -30,9 +27,9 @@ def init():
 
     # create trackbars for fine tuning
     cv2.createTrackbar("select-swatch", "Mask", 0, 3, lambda x: None)
-    cv2.createTrackbar("hue-error", "Mask", 25, 50, lambda x: None)
-    cv2.createTrackbar("sat-error", "Mask", 75, 200, lambda x: None)
-    cv2.createTrackbar("val-error", "Mask", 100, 200, lambda x: None)
+    cv2.createTrackbar("hue-error", "Mask", 0, 50, lambda x: None)
+    cv2.createTrackbar("sat-error", "Mask", 0, 200, lambda x: None)
+    cv2.createTrackbar("val-error", "Mask", 0, 200, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 50, lambda x: None)
 
     # initialize getting mouse position
@@ -263,7 +260,7 @@ def save_colors(colors, errors, min_areas, min_angle, max_angle):
 init()
 
 colors = [[20,20,20], [0,0,0], [0,0,0], [0,0,0]]
-errors = [[15, 25, 50] for _ in range(4)]
+errors = [[15, 75, 50] for _ in range(4)]
 min_areas = [250 for _ in range(4)]
 temp = -1
 
