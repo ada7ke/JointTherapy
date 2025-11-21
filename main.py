@@ -2,13 +2,14 @@
 import cv2, os.path, json, time
 import numpy as np
 
+# setup camera feed
 camera_feed = cv2.VideoCapture(0)
 if not camera_feed.isOpened():
     print("Cannot open camera")
     exit()
 camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-mouseX, mouseY = 0, 0
 
+mouseX, mouseY = 0, 0
 def get_mouse_pos(event, x, y, flags, param):
     # get mouse position
     global mouseX, mouseY
@@ -21,14 +22,14 @@ def init():
     cv2.namedWindow("Mask")
 
     # create trackbars for getting angles
-    cv2.createTrackbar("min-angle", "Camera Feed", 0, 180, lambda x: None)
-    cv2.createTrackbar("max-angle", "Camera Feed", 120, 180, lambda x: None)
+    cv2.createTrackbar("min-angle", "Camera Feed", 45, 180, lambda x: None)
+    cv2.createTrackbar("max-angle", "Camera Feed", 125, 180, lambda x: None)
 
     # create trackbars for fine tuning
     cv2.createTrackbar("select-swatch", "Mask", 0, 3, lambda x: None)
-    cv2.createTrackbar("hue-error", "Mask", 10, 50, lambda x: None)
-    cv2.createTrackbar("sat-error", "Mask", 25, 200, lambda x: None)
-    cv2.createTrackbar("val-error", "Mask", 25, 200, lambda x: None)
+    cv2.createTrackbar("hue-error", "Mask", 25, 50, lambda x: None)
+    cv2.createTrackbar("sat-error", "Mask", 75, 200, lambda x: None)
+    cv2.createTrackbar("val-error", "Mask", 100, 200, lambda x: None)
     cv2.createTrackbar("min-area", "Mask", 5, 50, lambda x: None)
 
     # initialize getting mouse position
@@ -151,7 +152,7 @@ def angle_between_lines(p1, p2, p3, p4):
     cos_angle = np.clip(cos_angle, -1.0, 1.0)
     angle_rad = np.arccos(cos_angle)
     angle_deg = np.degrees(angle_rad)
-    return angle_deg
+    return 180-angle_deg
 
 def have_all_centers(centers, indexes):
     # check if every center exists
@@ -175,53 +176,37 @@ def compute_chain_angle(centers):
 def within_tol(currentAngle, targetAngle):
     return targetAngle-10 < currentAngle < targetAngle+10
 
-def display_instructions(drawings, angle, min_angle, max_angle, direction, armed, tol, hysteresis):
+def display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance):
     out = drawings.copy()
 
     if angle is None:
         cv2.putText(out, "Finding targets...", (10, 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        return out, direction, armed
+        return out, stage
 
-    # EXTEND phase
-    if direction == 1:
-        # Flip only if armed and within tol near max
-        if armed and angle >= max_angle - tol:
-            direction = -1
-            armed = False
-            cv2.putText(out, "Target reached. Now bend", (10, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        else:
-            cv2.putText(out, "Extend arm", (10, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-        # Re-arm after moving away from the flip band
-        if not armed and angle <= max_angle - tol - hysteresis:
-            armed = True
-
-        if angle > max_angle + tol:
-            cv2.putText(out, "WARNING: DO NOT EXTEND FURTHER", (10, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-    # BEND phase
-    elif direction == -1:
-        if armed and angle <= min_angle + tol:
-            direction = 1
-            armed = False
-            cv2.putText(out, "Target reached. Now extend", (10, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        else:
-            cv2.putText(out, "Bend arm", (10, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-        if not armed and angle >= min_angle + tol + hysteresis:
-            armed = True
-
-        if angle < min_angle - tol:
-            cv2.putText(out, "WARNING: DO NOT BEND FURTHER", (10, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-    return out, direction, armed
+    if angle >=max_angle + tolerance:
+        cv2.putText(out, "WARNING: DO NOT EXTEND ARM FURTHER. BEND ARM", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    elif angle <=min_angle - tolerance:
+        cv2.putText(out, "WARNING: DO NOT BEND ARM FURTHER. EXTEND ARM", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    elif angle >= max_angle - tolerance:
+        stage = 1
+        cv2.putText(out, "Target reached. Now bend", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    elif angle <= min_angle + tolerance:
+        stage = 0
+        cv2.putText(out, "Target reached. Extend", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    # extend
+    elif stage == 0:
+        cv2.putText(out, "Extend arm", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+    # bend
+    elif stage == 1:
+        cv2.putText(out, "Bend arm", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+    return out, stage
 
 def import_colors(data):
     with open(data, 'r') as f:
@@ -279,8 +264,8 @@ errors = [[15, 25, 50] for _ in range(4)]
 min_areas = [250 for _ in range(4)]
 temp = -1
 
-direction = 1
-armed = True
+stage = 0
+tolerance = 25
 
 while True:
     # read camera feed
@@ -325,8 +310,7 @@ while True:
                     label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
     # write directions for user
-    drawings, direction, armed = display_instructions(
-        drawings, angle, min_angle, max_angle, direction, armed, tol=30, hysteresis=8)
+    drawings, stage = display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance)
 
     # draw swatches
     drawings = draw_swatches(drawings, colors)
@@ -341,17 +325,17 @@ while True:
     # keyboard controls
     keypressed = cv2.waitKey(1)
     swatch_keys = [ord('1'), ord('2'), ord('3'), ord('4')]
-    if keypressed in swatch_keys:
+    if keypressed in swatch_keys: # update color swatches
         color_index = int(chr(keypressed)) - 1
         colors[color_index] = list(map(int, hsv[mouseY, mouseX]))
-    if keypressed == ord('i'):
+    if keypressed == ord('i'): # import data
         data = input("Enter the data txt file: ")
         if os.path.isfile(data):
             colors, errors, min_areas, min_angle, max_angle = import_colors(data)
             print("Imported!")
         else:
             print("The filename was invalid")
-    if keypressed == ord('s'):
+    if keypressed == ord('s'): # save data
         save_colors(colors, errors, min_areas, min_angle, max_angle)
         print("Saved!")
     if keypressed == 27:
