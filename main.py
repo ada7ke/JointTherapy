@@ -1,4 +1,4 @@
-#todo - audio warning
+#todo - audio warning， exposure trackbar
 import cv2, os.path, json, time
 import numpy as np
 
@@ -49,39 +49,31 @@ def display_masks(frame, hsv_frame, min_colors, max_colors):
     # combine with frame
     return cv2.bitwise_and(frame, frame, mask=combined_mask)
 
-def draw_swatches(drawings, hsv_colors):
-    # display swatches for picked colors in top left corner of window
-    hsv_arr = np.array(hsv_colors, dtype=np.uint8).reshape((-1, 1, 3))
-    bgr_arr = cv2.cvtColor(hsv_arr, cv2.COLOR_HSV2BGR).reshape((-1, 3))
-
-    for i, bgr in enumerate(bgr_arr):
-        tl = (10 + i * 40, 10)
-        br = (10 + i * 40 + 30, 40)
-        cv2.rectangle(drawings, tl, br, tuple(int(c) for c in bgr), -1)
-        cv2.putText(drawings, str(i + 1), (20 + i * 40, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-    return drawings
-
-def get_min_colors(colors, errors):
-    # get minimum threshold for colors
+def get_color_range(colors, errors):
+    # get minimum threshold for hsv colors
     arr = np.asarray(colors, dtype=int)
     err = np.asarray(errors, dtype=int)
     lower = np.empty_like(arr)
+    upper = np.empty_like(arr)
 
     lower[:, 0] = np.clip(arr[:, 0] - err[:, 0], 0, 179)
     lower[:, 1] = np.clip(arr[:, 1] - err[:, 1], 0, 255)
     lower[:, 2] = np.clip(arr[:, 2] - err[:, 2], 0, 255)
-    return lower.astype(np.uint8)
-
-def get_max_colors(colors, errors):
-    # get maximum threshold for colors
-    arr = np.asarray(colors, dtype=int)
-    err = np.asarray(errors, dtype=int)
-    upper = np.empty_like(arr)
-
     upper[:, 0] = np.clip(arr[:, 0] + err[:, 0], 0, 179)
     upper[:, 1] = np.clip(arr[:, 1] + err[:, 1], 0, 255)
     upper[:, 2] = np.clip(arr[:, 2] + err[:, 2], 0, 255)
-    return upper.astype(np.uint8)
+    return lower.astype(np.uint8), upper.astype(np.uint8)
+
+def get_largest_box(contours, min_area):
+    # return the largest box
+    best = None
+    best_area = min_area
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > best_area:
+            best = contour
+            best_area = area
+    return best
 
 def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas, show_all):
     centers = []
@@ -117,17 +109,6 @@ def draw_boxes(hsv_frame, draw_on_bgr, color_min, color_max, min_areas, show_all
 
     return out, centers
 
-def get_largest_box(contours, min_area):
-    # return the largest box
-    best = None
-    best_area = min_area
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > best_area:
-            best = contour
-            best_area = area
-    return best
-
 def draw_lines(drawings, c1, c2):
     # draw lines between two centers
     out = drawings.copy()
@@ -136,7 +117,7 @@ def draw_lines(drawings, c1, c2):
     cv2.circle(out, c2, 4, (255, 255, 255), -1)
     return out
 
-def angle_between_lines(p1, p2, p3, p4):
+def calculate_angle(p1, p2, p3, p4):
     v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
     v2 = np.array([p4[0] - p3[0], p4[1] - p3[1]])
 
@@ -154,27 +135,31 @@ def angle_between_lines(p1, p2, p3, p4):
     angle_deg = np.degrees(angle_rad)
     return 180-angle_deg
 
-def have_all_centers(centers, indexes):
+def get_angle(centers):
     # check if every center exists
     pts = []
-    for i in indexes:
+    for i in range(4):
         if i >= len(centers) or centers[i] is None:
             return False
         pts.append(centers[i])
     # ensure non-zero-length legs: (i->j) and (j->k)
-    (x1,y1),(x2,y2),(x3,y3),(x4,y4) = pts
+    (x1, y1), (x2, y2), (x3, y3), (x4, y4) = pts
 
     # return true if all centers exist and lengths aren't zero
-    return (x1, y1) != (x2, y2) and (x3, y3) != (x4, y4)
+    have_all_centers =  (x1, y1) != (x2, y2) and (x3, y3) != (x4, y4)
 
-def compute_chain_angle(centers):
     # get angle between segments or return None if missing
-    if not have_all_centers(centers, (0, 1, 2, 3)):
+    if not have_all_centers:
         return None
-    return angle_between_lines(centers[0], centers[1], centers[2], centers[3])
+    return calculate_angle(centers[0], centers[1], centers[2], centers[3])
 
-def within_tol(currentAngle, targetAngle):
-    return targetAngle-10 < currentAngle < targetAngle+10
+def display_angle(drawings, centers, angle):
+    out = drawings.copy()
+    if angle is not None:
+        label_pos = centers[1] if len(centers) > 1 and centers[1] is not None else (20, 40)
+        cv2.putText(out, f"{angle:.1f} deg",
+                    label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    return out
 
 def display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance):
     out = drawings.copy()
@@ -207,6 +192,18 @@ def display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance
         cv2.putText(out, "Bend arm", (10, 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
     return out, stage
+
+def draw_swatches(drawings, hsv_colors):
+    # display swatches for picked colors in top left corner of window
+    hsv_arr = np.array(hsv_colors, dtype=np.uint8).reshape((-1, 1, 3))
+    bgr_arr = cv2.cvtColor(hsv_arr, cv2.COLOR_HSV2BGR).reshape((-1, 3))
+
+    for i, bgr in enumerate(bgr_arr):
+        tl = (10 + i * 40, 10)
+        br = (10 + i * 40 + 30, 40)
+        cv2.rectangle(drawings, tl, br, tuple(int(c) for c in bgr), -1)
+        cv2.putText(drawings, str(i + 1), (20 + i * 40, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    return drawings
 
 def import_colors(data):
     with open(data, 'r') as f:
@@ -289,8 +286,7 @@ while True:
     min_areas[swatch_select] = cv2.getTrackbarPos("min-area", "Mask") * 50
 
     # draw boxes
-    min_colors = get_min_colors(colors, errors)
-    max_colors = get_max_colors(colors, errors)
+    min_colors, max_colors = get_color_range(colors, errors)
     drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas, show_all=True)
 
     # draw lines between boxes
@@ -299,23 +295,14 @@ while True:
         drawings = draw_lines(drawings, centers[2], centers[3])
 
     # get angle between lines
-    angle = compute_chain_angle(centers)
+    angle = get_angle(centers)
     min_angle = cv2.getTrackbarPos("min-angle", "Camera Feed")
     max_angle = cv2.getTrackbarPos("max-angle", "Camera Feed")
 
-    # display angle
-    if angle is not None:
-        label_pos = centers[1] if len(centers) > 1 and centers[1] is not None else (20, 40)
-        cv2.putText(drawings, f"{angle:.1f} deg",
-                    label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-    # write directions for user
+    # display camera feed live feedback
+    drawings = display_angle(frame, centers, angle)
     drawings, stage = display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance)
-
-    # draw swatches
     drawings = draw_swatches(drawings, colors)
-
-    # display live camera feed
     cv2.imshow("Camera Feed", drawings)
 
     # display detected regions in mask window
