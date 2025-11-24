@@ -2,6 +2,7 @@
 import cv2, os.path, json, time
 import numpy as np
 from playsound3 import playsound
+from datetime import datetime, timedelta
 
 # setup camera feed
 camera_feed = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -26,7 +27,7 @@ def init():
 
     # create trackbars for getting angles
     cv2.createTrackbar("min-angle", "Camera Feed", 45, 180, lambda x: None)
-    cv2.createTrackbar("max-angle", "Camera Feed", 125, 180, lambda x: None)
+    cv2.createTrackbar("max-angle", "Camera Feed", 115, 180, lambda x: None)
 
     # create trackbars for fine tuning
     cv2.createTrackbar("exposure", "Mask", 0, 0, lambda x: None)
@@ -168,10 +169,11 @@ def display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance
     out = drawings.copy()
     temp = stage
     warning = False
+
     if angle is None:
         cv2.putText(out, "Finding targets...", (10, 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        return out, stage
+        return out, stage, warning
 
     if angle >= max_angle + tolerance:
         warning = True
@@ -272,7 +274,9 @@ min_areas = [250 for _ in range(4)]
 temp = -1
 
 stage = 0
-tolerance = 25
+tolerance = 10
+warning = False
+timer = datetime.now()
 
 while True:
     exposure = cv2.getTrackbarPos("exposure", "Mask")
@@ -316,7 +320,10 @@ while True:
         drawings, stage, warning = display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance)
 
     if warning:
-
+        deltatime = datetime.now() - timer
+        if deltatime >= timedelta(seconds=0.15):
+            timer = datetime.now()
+            playsound("beep.mp3", block=False)
 
     # display live feedback on camera feed
     drawings = draw_swatches(drawings, colors)
