@@ -1,4 +1,4 @@
-#todo - audio warning， exposure trackbar
+#todo - audio warning， tune hsv trackbar ranges
 import cv2, os.path, json, time
 import numpy as np
 
@@ -7,7 +7,6 @@ camera_feed = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 if not camera_feed.isOpened():
     raise RuntimeError("Camera not found")
 camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-camera_feed.set(cv2.CAP_PROP_AUTO_EXPOSURE, -5)
 
 mouseX, mouseY = 0, 0
 def get_mouse_pos(event, x, y, flags, param):
@@ -26,6 +25,8 @@ def init():
     cv2.createTrackbar("max-angle", "Camera Feed", 125, 180, lambda x: None)
 
     # create trackbars for fine tuning
+    cv2.createTrackbar("exposure", "Mask", -5, 0, lambda x: None)
+    cv2.setTrackbarMin("exposure", "Mask", -10)
     cv2.createTrackbar("select-swatch", "Mask", 0, 3, lambda x: None)
     cv2.createTrackbar("hue-error", "Mask", 0, 50, lambda x: None)
     cv2.createTrackbar("sat-error", "Mask", 0, 200, lambda x: None)
@@ -34,10 +35,6 @@ def init():
 
     # initialize getting mouse position
     cv2.setMouseCallback("Camera Feed", get_mouse_pos)
-
-def adjust_exposure(frame, cap):
-    exposure_value = -4
-    cap.set(cv2.CAP_PROP_EXPOSURE, exposure_value)
 
 def display_masks(frame, hsv_frame, min_colors, max_colors):
     # combine masks
@@ -265,6 +262,9 @@ stage = 0
 tolerance = 25
 
 while True:
+    exposure = cv2.getTrackbarPos("exposure", "Mask")
+    camera_feed.set(cv2.CAP_PROP_EXPOSURE, exposure)
+
     # read camera feed
     ret, frame = camera_feed.read()
     if not ret:
@@ -289,19 +289,19 @@ while True:
     min_colors, max_colors = get_color_range(colors, errors)
     drawings, centers = draw_boxes(hsv, drawings, min_colors, max_colors, min_areas, show_all=True)
 
-    # draw lines between boxes
-    if len(centers) == 4:
-        drawings = draw_lines(drawings, centers[0], centers[1])
-        drawings = draw_lines(drawings, centers[2], centers[3])
 
-    # get angle between lines
-    angle = get_angle(centers)
-    min_angle = cv2.getTrackbarPos("min-angle", "Camera Feed")
-    max_angle = cv2.getTrackbarPos("max-angle", "Camera Feed")
+    # if len(centers) == 4:
+    #     # draw lines between boxes
+    #     drawings = draw_lines(drawings, centers[0], centers[1])
+    #     drawings = draw_lines(drawings, centers[2], centers[3])
+    #
+    #     # write angle between lines
+    #     angle = get_angle(centers)
+    #     min_angle = cv2.getTrackbarPos("min-angle", "Camera Feed")
+    #     max_angle = cv2.getTrackbarPos("max-angle", "Camera Feed")
+    #     drawings = display_angle(frame, centers, angle)
+    #     drawings, stage = display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance)
 
-    # display camera feed live feedback
-    drawings = display_angle(frame, centers, angle)
-    drawings, stage = display_instructions(drawings, angle, min_angle, max_angle, stage, tolerance)
     drawings = draw_swatches(drawings, colors)
     cv2.imshow("Camera Feed", drawings)
 
