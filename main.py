@@ -1,4 +1,4 @@
-#todo - audio warning， tune hsv trackbar ranges
+#todo -
 import cv2, os.path, json, time
 import numpy as np
 from playsound3 import playsound
@@ -274,7 +274,7 @@ min_areas = [250 for _ in range(4)]
 temp = -1
 
 stage = 0
-tolerance = 10
+tolerance = 15
 warning = False
 timer = datetime.now()
 
@@ -321,7 +321,7 @@ while True:
 
     if warning:
         deltatime = datetime.now() - timer
-        if deltatime >= timedelta(seconds=0.15):
+        if deltatime >= timedelta(seconds=1):
             timer = datetime.now()
             playsound("beep.mp3", block=False)
 
